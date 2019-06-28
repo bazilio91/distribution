@@ -17,6 +17,7 @@ var showVersion bool
 func init() {
 	RootCmd.AddCommand(ServeCmd)
 	RootCmd.AddCommand(GCCmd)
+	RootCmd.AddCommand(StatsCmd)
 	GCCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "do everything except remove the blobs")
 	GCCmd.Flags().BoolVarP(&removeUntagged, "delete-untagged", "m", false, "delete manifests that are not currently referenced via tag")
 	RootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "show the version and exit")
@@ -85,5 +86,53 @@ var GCCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "failed to garbage collect: %v", err)
 			os.Exit(1)
 		}
+	},
+}
+
+// StatsCmd is the cobra command that corresponds to the stats subcommand
+var StatsCmd = &cobra.Command{
+	Use:   "stats <config>",
+	Short: "`stats` gather statistics about storage usage",
+	Long:  "`stats` gather statistics about storage usage",
+	Run: func(cmd *cobra.Command, args []string) {
+		config, err := resolveConfiguration(args)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
+			cmd.Usage()
+			os.Exit(1)
+		}
+
+		driver, err := factory.Create(config.Storage.Type(), config.Storage.Parameters())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to construct %s driver: %v", config.Storage.Type(), err)
+			os.Exit(1)
+		}
+
+		ctx := dcontext.Background()
+		ctx, err = configureLogging(ctx, config)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "unable to configure logging with config: %s", err)
+			os.Exit(1)
+		}
+
+		k, err := libtrust.GenerateECP256PrivateKey()
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		registry, err := storage.NewRegistry(ctx, driver, storage.Schema1SigningKey(k))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to construct registry: %v", err)
+			os.Exit(1)
+		}
+
+		results, err := storage.Stats(ctx, driver, registry, storage.StatsOpts{})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to garbage collect: %v", err)
+			os.Exit(1)
+		}
+
+		results.Print()
 	},
 }
